@@ -1,0 +1,41 @@
+name: Convert uploaded Excels -> JSON -> gh-pages
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'  # istersen bu satırı sil; otomatik bir saatlik tetikleme
+
+jobs:
+  convert-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Convert uploaded excels to JSON
+        run: |
+          python scripts/convert_uploaded_excels.py
+          echo "Data files:"
+          ls -la data || true
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: ./data
+
+  deploy:
+    needs: convert-and-publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1

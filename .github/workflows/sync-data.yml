@@ -1,9 +1,11 @@
-name: Convert uploaded Excels -> JSON -> gh-pages (direct push)
+name: Convert uploaded Excels -> JSON -> gh-pages (direct push, with permissions)
+
+# ensure the workflow token has write permission to repo contents
+permissions:
+  contents: write
 
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 * * * *'   # otomatik istiyorsan burayı aç
 
 jobs:
   convert-and-publish:
@@ -13,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true   # push için gerekli token'ı sağlar
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -31,19 +33,21 @@ jobs:
           echo "Data listing:"
           ls -la data || true
 
-      - name: Prepare gh-pages branch (force update)
+      - name: Prepare gh-pages branch (force update, push using token)
         env:
-          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: gh-pages
+          RUN_NO: ${{ github.run_number }}
         run: |
-          set -e
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Eğer gh-pages branch varsa temizleyip onun yerine yeni içerik koyacağız.
-          if git show-ref --verify --quiet refs/heads/gh-pages; then
-            echo "gh-pages exists -> create temporary worktree"
-            # clear worktree area
-            git worktree add /tmp/gh-pages gh-pages
+          # If gh-pages exists, use a temporary worktree; if not, create orphan
+          if git show-ref --verify --quiet refs/heads/${BRANCH}; then
+            echo "gh-pages exists -> update via worktree"
+            git worktree add /tmp/gh-pages ${BRANCH}
             rm -rf /tmp/gh-pages/* || true
             cp -r data/* /tmp/gh-pages/ || true
             cd /tmp/gh-pages
@@ -51,19 +55,20 @@ jobs:
             if git diff --cached --quiet; then
               echo "No changes to gh-pages."
             else
-              git commit -m "Update data from workflow run ${GITHUB_RUN_NUMBER}"
-              git push origin HEAD:gh-pages --force
+              git commit -m "Update data from workflow run ${RUN_NO}"
+              # push using token-authenticated URL
+              git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" HEAD:${BRANCH} --force
             fi
             cd $GITHUB_WORKSPACE
             git worktree remove /tmp/gh-pages --force || true
           else
             echo "gh-pages does not exist -> create orphan branch and push"
-            git checkout --orphan gh-pages
-            git rm -rf .
+            git checkout --orphan ${BRANCH}
+            git rm -rf . || true
             cp -r data/* .
             git add -A
-            git commit -m "Create gh-pages with data from workflow ${GITHUB_RUN_NUMBER}" || true
-            git push origin gh-pages --force
-            # return to main branch
-            git checkout -f ${GITHUB_REF_NAME}
+            git commit -m "Create gh-pages with data from workflow ${RUN_NO}" || true
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" ${BRANCH} --force
+            # go back to previous branch (usually main)
+            git checkout -f ${GITHUB_REF_NAME:-main} || true
           fi
